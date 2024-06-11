@@ -1,18 +1,23 @@
-import { Engine } from "@babylonjs/core/Engines/engine";
-import { Scene } from "@babylonjs/core/scene";
-import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
-import { Effect } from "@babylonjs/core/Materials/effect";
-import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
-import { Texture } from "@babylonjs/core/Materials/Textures/texture";
-import { PointLight } from "@babylonjs/core/Lights/pointLight";
-import "@babylonjs/core/Materials/standardMaterial";
-import "@babylonjs/core/Loading/loadingScreen";
+import {
+    Color3,
+    DirectionalLight,
+    Engine,
+    HavokPlugin,
+    HemisphericLight,
+    MeshBuilder, PBRMetallicRoughnessMaterial,
+    PhysicsAggregate,
+    PhysicsShapeType,
+    ReflectionProbe,
+    Scene,
+    ShadowGenerator,
+    StandardMaterial,
+    Vector3
+} from "@babylonjs/core";
+import HavokPhysics from "@babylonjs/havok";
 
 import "../styles/index.scss";
-
-import postprocessCode from "../shaders/smallPostProcess.glsl";
+import { CharacterController } from "./character";
+import { SkyMaterial } from "@babylonjs/materials";
 
 const canvas = document.getElementById("renderer") as HTMLCanvasElement;
 canvas.width = window.innerWidth;
@@ -20,38 +25,77 @@ canvas.height = window.innerHeight;
 
 const engine = new Engine(canvas);
 
+const havokInstance = await HavokPhysics();
+const havokPlugin = new HavokPlugin(true, havokInstance);
+
 const scene = new Scene(engine);
+scene.enablePhysics(new Vector3(0, -9.81, 0), havokPlugin);
 
-const camera = new FreeCamera("camera", Vector3.Zero(), scene);
-camera.attachControl();
+const sun = new DirectionalLight("light", new Vector3(-5, -10, 5).normalize(), scene);
+sun.position = sun.direction.negate().scaleInPlace(40);
 
-const light = new PointLight("light", new Vector3(-5, 5, 10), scene);
+// Shadows
+const shadowGenerator = new ShadowGenerator(1024, sun);
+shadowGenerator.useExponentialShadowMap = true;
 
-const sphere = MeshBuilder.CreateSphere("sphere", { segments: 32, diameter: 1 }, scene);
-sphere.position = new Vector3(0, 0, 10);
+const hemiLight = new HemisphericLight("hemi", Vector3.Up(), scene);
+hemiLight.intensity = 0.4;
 
-Effect.ShadersStore[`PostProcess1FragmentShader`] = postprocessCode;
-const postProcess = new PostProcess("postProcess1", "PostProcess1", [], ["textureSampler"], 1, camera, Texture.BILINEAR_SAMPLINGMODE, engine);
+const skyMaterial = new SkyMaterial("skyMaterial", scene);
+skyMaterial.backFaceCulling = false;
+skyMaterial.useSunPosition = true;
+skyMaterial.sunPosition = sun.direction.negate();
 
-let clock = 0;
+const skybox = MeshBuilder.CreateBox("skyBox", { size: 100.0 }, scene);
+skybox.material = skyMaterial;
+
+// Reflection probe
+const rp = new ReflectionProbe("ref", 512, scene);
+rp.renderList?.push(skybox);
+
+scene.environmentTexture = rp.cubeTexture;
+
+const groundMaterial = new PBRMetallicRoughnessMaterial("groundMat", scene);
+
+const ground = MeshBuilder.CreateGround("ground", { width: 100, height: 100 });
+ground.material = groundMaterial;
+ground.receiveShadows = true;
+
+new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
+
+const characterController = await CharacterController.CreateAsync(scene);
+shadowGenerator.addShadowCaster(characterController.mesh);
+
+const boxMaterial = new PBRMetallicRoughnessMaterial("boxMaterial", scene);
+boxMaterial.baseColor = Color3.Random();
+
+const box = MeshBuilder.CreateBox("Box", { size: 1 }, scene);
+box.material = boxMaterial;
+shadowGenerator.addShadowCaster(box);
+
+box.position.y = 4;
+box.position.z = 5;
+
+const boxAggregate = new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 1 }, scene);
+boxAggregate.body.applyAngularImpulse(new Vector3(Math.random(), Math.random(), Math.random()));
+
+let elapsedSeconds = 0;
 
 function updateScene() {
     const deltaTime = engine.getDeltaTime() / 1000;
-    clock += deltaTime;
-
-    sphere.position.x = Math.cos(clock);
-    sphere.position.z = 5 + Math.sin(clock);
+    elapsedSeconds += deltaTime;
 }
 
 scene.executeWhenReady(() => {
+
     engine.loadingScreen.hideLoadingUI();
     scene.registerBeforeRender(() => updateScene());
     engine.runRenderLoop(() => scene.render());
 });
 
 window.addEventListener("resize", () => {
-    engine.resize();
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    engine.resize();
 });
 

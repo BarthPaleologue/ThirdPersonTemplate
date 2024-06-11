@@ -14,6 +14,9 @@ devDependencies:
   '@babylonjs/loaders':
     specifier: ^7.10.2
     version: 7.10.2(@babylonjs/core@7.10.2)(babylonjs-gltf2interface@7.10.2)
+  '@babylonjs/materials':
+    specifier: ^7.10.2
+    version: 7.10.2(@babylonjs/core@7.10.2)
   '@typescript-eslint/eslint-plugin':
     specifier: ^7.13.0
     version: 7.13.0(@typescript-eslint/parser@7.13.0)(eslint@8.57.0)(typescript@5.4.5)
@@ -128,6 +131,14 @@ packages:
     dependencies:
       '@babylonjs/core': 7.10.2
       babylonjs-gltf2interface: 7.10.2
+    dev: true
+
+  /@babylonjs/materials@7.10.2(@babylonjs/core@7.10.2):
+    resolution: {integrity: sha512-L+YrIVV8TXV/whETMyACrqseb8HIuTXkxKxybKpp8L3Qbxv4VhZQ5xJC9Hs2DhraUcyJxwNqeT38T9VDdgqkRg==}
+    peerDependencies:
+      '@babylonjs/core': ^7.0.0
+    dependencies:
+      '@babylonjs/core': 7.10.2
     dev: true
 
   /@cspotcode/source-map-support@0.8.1:
