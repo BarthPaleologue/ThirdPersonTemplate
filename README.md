@@ -1,8 +1,10 @@
-# BabylonJS Template
+# Third person template
 
 [![NodeJS with Webpack](https://github.com/BarthPaleologue/babylonjs-template/actions/workflows/webpack.yml/badge.svg)](https://github.com/BarthPaleologue/babylonjs-template/actions/workflows/webpack.yml)
 
-A simple template to quick start a BabylonJS project with a working webpack config out of the box and prettier and eslint.
+![cover image](cover.png)
+
+A simple template to quick start a BabylonJS project with a working third person character controller, webpack config, prettier and eslint.
 
 This project has been created using **webpack-cli**, you can now run
 

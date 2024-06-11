@@ -9,8 +9,7 @@ import {
     PhysicsShapeType,
     ReflectionProbe,
     Scene,
-    ShadowGenerator,
-    StandardMaterial,
+    ShadowGenerator, Tools,
     Vector3
 } from "@babylonjs/core";
 import HavokPhysics from "@babylonjs/havok";
@@ -24,6 +23,7 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 const engine = new Engine(canvas);
+engine.displayLoadingUI();
 
 const havokInstance = await HavokPhysics();
 const havokPlugin = new HavokPlugin(true, havokInstance);
@@ -66,30 +66,27 @@ new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
 const characterController = await CharacterController.CreateAsync(scene);
 shadowGenerator.addShadowCaster(characterController.mesh);
 
-const boxMaterial = new PBRMetallicRoughnessMaterial("boxMaterial", scene);
-boxMaterial.baseColor = Color3.Random();
+for(let i = 0; i < 4; i++) {
+    const boxMaterial = new PBRMetallicRoughnessMaterial("boxMaterial", scene);
+    boxMaterial.baseColor = Color3.Random();
 
-const box = MeshBuilder.CreateBox("Box", { size: 1 }, scene);
-box.material = boxMaterial;
-shadowGenerator.addShadowCaster(box);
+    const box = MeshBuilder.CreateBox("Box", { size: 1 }, scene);
+    box.material = boxMaterial;
+    shadowGenerator.addShadowCaster(box);
+    box.position.copyFromFloats((Math.random() - 0.5) * 6, 4 + Math.random() * 2, 5 + Math.random() * 2);
 
-box.position.y = 4;
-box.position.z = 5;
-
-const boxAggregate = new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 1 }, scene);
-boxAggregate.body.applyAngularImpulse(new Vector3(Math.random(), Math.random(), Math.random()));
-
-let elapsedSeconds = 0;
+    const boxAggregate = new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 1 }, scene);
+    boxAggregate.body.applyAngularImpulse(new Vector3(Math.random(), Math.random(), Math.random()));
+}
 
 function updateScene() {
-    const deltaTime = engine.getDeltaTime() / 1000;
-    elapsedSeconds += deltaTime;
+    const deltaSeconds = engine.getDeltaTime() / 1000;
+    characterController.update(deltaSeconds);
 }
 
 scene.executeWhenReady(() => {
-
     engine.loadingScreen.hideLoadingUI();
-    scene.registerBeforeRender(() => updateScene());
+    scene.onBeforeRenderObservable.add(() => updateScene());
     engine.runRenderLoop(() => scene.render());
 });
 
@@ -99,3 +96,8 @@ window.addEventListener("resize", () => {
     engine.resize();
 });
 
+document.addEventListener("keydown", async e => {
+    if(e.key === "p") {
+        Tools.CreateScreenshot(engine, characterController.thirdPersonCamera, {width: canvas.width, height: canvas.height});
+    }
+})
