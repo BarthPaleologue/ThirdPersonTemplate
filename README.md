@@ -1,6 +1,7 @@
 # Third person template
 
 [![NodeJS with Webpack](https://github.com/BarthPaleologue/babylonjs-template/actions/workflows/webpack.yml/badge.svg)](https://github.com/BarthPaleologue/babylonjs-template/actions/workflows/webpack.yml)
+[![Build & Deploy site to Pages](https://github.com/BarthPaleologue/ThirdPersonTemplate/actions/workflows/deploy.yml/badge.svg)](https://github.com/BarthPaleologue/ThirdPersonTemplate/actions/workflows/deploy.yml)
 
 ![cover image](cover.png)
 
