@@ -7,6 +7,7 @@ import {
     MeshBuilder, PBRMetallicRoughnessMaterial,
     PhysicsAggregate,
     PhysicsShapeType,
+    PhysicsViewer,
     ReflectionProbe,
     Scene,
     ShadowGenerator, Tools,
@@ -64,9 +65,10 @@ ground.receiveShadows = true;
 new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
 const characterController = await CharacterController.CreateAsync(scene);
-shadowGenerator.addShadowCaster(characterController.mesh);
+characterController.getTransform().position.y = 3;
+shadowGenerator.addShadowCaster(characterController.model);
 
-for(let i = 0; i < 4; i++) {
+for (let i = 0; i < 4; i++) {
     const boxMaterial = new PBRMetallicRoughnessMaterial("boxMaterial", scene);
     boxMaterial.baseColor = Color3.Random();
 
@@ -75,7 +77,7 @@ for(let i = 0; i < 4; i++) {
     shadowGenerator.addShadowCaster(box);
     box.position.copyFromFloats((Math.random() - 0.5) * 6, 4 + Math.random() * 2, 5 + Math.random() * 2);
 
-    const boxAggregate = new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 1 }, scene);
+    const boxAggregate = new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 10 }, scene);
     boxAggregate.body.applyAngularImpulse(new Vector3(Math.random(), Math.random(), Math.random()));
 }
 
@@ -96,8 +98,22 @@ window.addEventListener("resize", () => {
     engine.resize();
 });
 
+const physicsViewer = new PhysicsViewer(scene);
+let bodyShown = false;
+
 document.addEventListener("keydown", async e => {
-    if(e.key === "p") {
-        Tools.CreateScreenshot(engine, characterController.thirdPersonCamera, {width: canvas.width, height: canvas.height});
+    if (e.key === "p") {
+        Tools.CreateScreenshot(engine, characterController.thirdPersonCamera, { width: canvas.width, height: canvas.height });
+    }
+    if (e.key === "v") {
+        bodyShown = !bodyShown;
+
+        if(bodyShown) {
+            scene.transformNodes.forEach(transform => { if (transform.physicsBody) physicsViewer.showBody(transform.physicsBody) });
+            scene.meshes.forEach(mesh => { if (mesh.physicsBody) physicsViewer.showBody(mesh.physicsBody) });
+        } else {
+            scene.transformNodes.forEach(transform => { if (transform.physicsBody) physicsViewer.hideBody(transform.physicsBody) });
+            scene.meshes.forEach(mesh => { if (mesh.physicsBody) physicsViewer.hideBody(mesh.physicsBody) });
+        }
     }
 })

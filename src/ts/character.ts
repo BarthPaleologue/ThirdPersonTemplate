@@ -3,7 +3,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 
 import character from "../assets/character.glb";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 import "@babylonjs/core/Animations/animatable";
 import "@babylonjs/core/Culling/ray";
@@ -11,61 +11,47 @@ import "@babylonjs/core/Culling/ray";
 import "@babylonjs/loaders/glTF/2.0/glTFLoader";
 import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
-import { PhysicsRaycastResult } from "@babylonjs/core/Physics/physicsRaycastResult";
-import { PhysicsEngineV2 } from "@babylonjs/core/Physics/v2";
 import { ActionManager, ExecuteCodeAction } from "@babylonjs/core/Actions";
-import { AnimationGroup, Space } from "@babylonjs/core";
-
-class AnimationGroupWrapper {
-    name: string;
-    group: AnimationGroup;
-    weight: number;
-
-    constructor(name: string, group: AnimationGroup, startingWeight: number) {
-        this.name = name;
-        this.weight = startingWeight;
-
-        this.group = group;
-        this.group.play(true);
-        this.group.setWeightForAllAnimatables(startingWeight);
-    }
-
-    moveTowardsWeight(targetWeight: number, deltaTime: number) {
-        this.weight = Math.min(Math.max(this.weight + deltaTime * Math.sign(targetWeight - this.weight), 0), 1);
-        this.group.setWeightForAllAnimatables(this.weight);
-    }
-}
+import { moveTowards } from "./utils";
+import { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody";
+import { AnimationGroup } from "@babylonjs/core/Animations/animationGroup";
+import { PhysicsMotionType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
+import { PhysicsShapeCylinder } from "@babylonjs/core/Physics/v2/physicsShape";
 
 export class CharacterController {
-    readonly mesh: AbstractMesh;
+    private readonly transform: TransformNode;
 
-    readonly heroSpeed = 1.8;
-    readonly heroSpeedBackwards = 1.2;
-    readonly heroRotationSpeed = 6;
+    readonly model: AbstractMesh;
 
+    readonly impostorPhysicsBody: PhysicsBody;
 
-    private readonly raycastResult: PhysicsRaycastResult;
+    readonly moveSpeed = 1.8;
+    readonly rotationSpeed = 6;
+    readonly animationBlendSpeed = 4.0;
 
-    readonly walkAnim: AnimationGroupWrapper;
-    readonly walkBackAnim: AnimationGroupWrapper;
-    readonly idleAnim: AnimationGroupWrapper;
-    readonly sambaAnim: AnimationGroupWrapper;
+    readonly walkAnim: AnimationGroup;
+    readonly sambaAnim: AnimationGroup;
+    readonly idleAnim: AnimationGroup;
 
-    private targetAnim: AnimationGroupWrapper;
-    readonly nonIdleAnimations: AnimationGroupWrapper[];
+    private targetAnim: AnimationGroup;
+    readonly nonIdleAnimations: AnimationGroup[];
 
     readonly inputMap: Map<string, boolean>;
 
     readonly thirdPersonCamera: ArcRotateCamera;
 
+    keyForward = "w";
+    keyBackward = "s";
+    keyLeft = "a";
+    keyRight = "d";
 
     static async CreateAsync(scene: Scene): Promise<CharacterController> {
         const result = await SceneLoader.ImportMeshAsync("", "", character, scene);
 
-        const hero = result.meshes[0];
+        const model = result.meshes[0];
 
         const cameraAttachPoint = new TransformNode("cameraAttachPoint", scene);
-        cameraAttachPoint.parent = hero;
+        cameraAttachPoint.parent = model;
         cameraAttachPoint.position = new Vector3(0, 1.5, 0);
 
         const camera = new ArcRotateCamera("thirdPersonCamera", -1.5, 1.2, 5, Vector3.Zero(), scene);
@@ -76,31 +62,37 @@ export class CharacterController {
         camera.lowerRadiusLimit = 3;
         camera.upperBetaLimit = 3.14 / 2 + 0.2;
 
-        return new CharacterController(hero, camera, scene);
+        return new CharacterController(model, camera, scene);
     }
 
     private constructor(characterMesh: AbstractMesh, thirdPersonCamera: ArcRotateCamera, scene: Scene) {
-        this.mesh = characterMesh;
+        this.transform = new TransformNode("CharacterTransform", scene);
+        this.transform.rotationQuaternion = Quaternion.Identity();
+
+        this.model = characterMesh;
+        this.model.parent = this.transform;
+        this.model.rotate(Vector3.Up(), Math.PI)
+        this.model.position.y = -0.5
+
         this.thirdPersonCamera = thirdPersonCamera;
 
         const walkAnimGroup = scene.getAnimationGroupByName("Walking");
         if (walkAnimGroup === null) throw new Error("'Walking' animation not found");
-        this.walkAnim = new AnimationGroupWrapper("Walking", walkAnimGroup, 0);
-
-        const walkBackAnimGroup = scene.getAnimationGroupByName("WalkingBackwards");
-        if (walkBackAnimGroup === null) throw new Error("'WalkingBackwards' animation not found");
-        this.walkBackAnim = new AnimationGroupWrapper("WalkingBackwards", walkBackAnimGroup, 0);
+        this.walkAnim = walkAnimGroup;
+        this.walkAnim.weight = 0;
 
         const idleAnimGroup = scene.getAnimationGroupByName("Idle");
         if (idleAnimGroup === null) throw new Error("'Idle' animation not found");
-        this.idleAnim = new AnimationGroupWrapper("Idle", idleAnimGroup, 1);
+        this.idleAnim = idleAnimGroup;
+        this.idleAnim.weight = 1;
 
         const sambaAnimGroup = scene.getAnimationGroupByName("SambaDancing");
         if (sambaAnimGroup === null) throw new Error("'Samba' animation not found");
-        this.sambaAnim = new AnimationGroupWrapper("SambaDancing", sambaAnimGroup, 0);
+        this.sambaAnim = sambaAnimGroup;
+        this.sambaAnim.weight = 0;
 
         this.targetAnim = this.idleAnim;
-        this.nonIdleAnimations = [this.walkAnim, this.walkBackAnim, this.sambaAnim];
+        this.nonIdleAnimations = [this.walkAnim, this.sambaAnim];
 
         this.inputMap = new Map();
         scene.actionManager = new ActionManager(scene);
@@ -115,71 +107,96 @@ export class CharacterController {
             })
         );
 
-        this.raycastResult = new PhysicsRaycastResult();
+        this.impostorPhysicsBody = new PhysicsBody(this.transform, PhysicsMotionType.DYNAMIC, false, scene);
+        const impostorShape = new PhysicsShapeCylinder(
+            new Vector3(0, -0.5, 0),
+            new Vector3(0, 1.7, 0),
+            0.5,
+            scene
+        );
+
+        this.impostorPhysicsBody.shape = impostorShape;
+        this.impostorPhysicsBody.setMassProperties({ mass: 1 });
+        this.impostorPhysicsBody.setAngularDamping(100);
+        this.impostorPhysicsBody.setLinearDamping(10);
     }
 
-    public move(direction: Vector3, distance: number) {
-        const start = this.mesh.position;
-        const end = start.add(direction.scale(distance + 0.5));
-        const scene = this.mesh.getScene();
-        (scene.getPhysicsEngine() as PhysicsEngineV2).raycastToRef(start, end, this.raycastResult);
-        if (!this.raycastResult.hasHit) {
-            this.mesh.translate(direction, distance, Space.WORLD);
-        }
+    public getTransform() {
+        return this.transform;
     }
 
-    public update(deltaSeconds: number) {
-        if (this.walkAnim.weight > 0.0) {
-            this.move(this.mesh.forward, this.heroSpeed * deltaSeconds * this.walkAnim.weight);
-        }
-
-        if (this.walkBackAnim.weight > 0.0) {
-            this.move(this.mesh.forward, -this.heroSpeedBackwards * deltaSeconds * this.walkBackAnim.weight);
-        }
-
-        const isWalking = this.walkAnim.weight > 0.0 || this.walkBackAnim.weight > 0.0;
-
+    public update(deltaSeconds: number) {        
         this.targetAnim = this.idleAnim;
 
-        // Translation
-        if (this.inputMap.get("z") || this.inputMap.get("w")) {
+        const angle180 = Math.PI;
+        const angle45 = angle180 / 4;
+        const angle90 = angle180 / 2;
+        const angle135 = angle45 + angle90;
+        const direction = this.thirdPersonCamera.getForwardRay().direction;
+        const forward = new Vector3(direction.x, 0, direction.z).normalize();
+        const rot = Quaternion.FromLookDirectionLH(forward, Vector3.Up());
+
+        let rotation = 0;
+        if (this.inputMap.get(this.keyBackward) && !this.inputMap.get(this.keyRight) && !this.inputMap.get(this.keyLeft)) {
+            rotation = angle180
+        }
+        if (this.inputMap.get(this.keyLeft) && !this.inputMap.get(this.keyForward) && !this.inputMap.get(this.keyBackward)) {
+            rotation = -angle90
+        }
+        if (this.inputMap.get(this.keyRight) && !this.inputMap.get(this.keyForward) && !this.inputMap.get(this.keyBackward)) {
+            rotation = angle90
+        }
+        if (this.inputMap.get(this.keyForward) && this.inputMap.get(this.keyRight)) {
+            rotation = angle45
+        }
+        if (this.inputMap.get(this.keyForward) && this.inputMap.get(this.keyLeft)) {
+            rotation = -angle45
+        }
+        if (this.inputMap.get(this.keyBackward) && this.inputMap.get(this.keyRight)) {
+            rotation = angle135
+        }
+        if (this.inputMap.get(this.keyBackward) && this.inputMap.get(this.keyLeft)) {
+            rotation = -angle135
+        }
+
+        rot.multiplyInPlace(Quaternion.RotationAxis(Vector3.Up(), rotation));
+
+        if (this.inputMap.get(this.keyForward) || this.inputMap.get(this.keyBackward) || this.inputMap.get(this.keyLeft) || this.inputMap.get(this.keyRight)) { 
             this.targetAnim = this.walkAnim;
-        } else if (this.inputMap.get("s")) {
-            this.targetAnim = this.walkBackAnim;
+
+            const quaternion = rot; //euler.toQuaternion();
+            const impostorQuaternion = this.transform.rotationQuaternion;
+            if (impostorQuaternion === null) {
+                throw new Error("Impostor quaternion is null");
+            }
+            Quaternion.SlerpToRef(
+                impostorQuaternion,
+                quaternion,
+                this.rotationSpeed * deltaSeconds,
+                impostorQuaternion
+            )
+            this.transform.translate(new Vector3(0, 0, -1), this.moveSpeed * deltaSeconds);
+            this.impostorPhysicsBody.setTargetTransform(this.transform.absolutePosition, impostorQuaternion)
         }
 
-        // Rotation
-        if ((this.inputMap.get("q") || this.inputMap.get("a")) && isWalking) {
-            this.mesh.rotate(Vector3.Up(), -this.heroRotationSpeed * deltaSeconds);
-        } else if (this.inputMap.get("d") && isWalking) {
-            this.mesh.rotate(Vector3.Up(), this.heroRotationSpeed * deltaSeconds);
-        }
-
-        // Samba!
         if (this.inputMap.get("b")) {
             this.targetAnim = this.sambaAnim;
         }
 
+        
         let weightSum = 0;
         for (const animation of this.nonIdleAnimations) {
             if (animation === this.targetAnim) {
-                animation.moveTowardsWeight(1, deltaSeconds);
+                animation.weight = moveTowards(animation.weight, 1, this.animationBlendSpeed * deltaSeconds);
             } else {
-                animation.moveTowardsWeight(0, deltaSeconds);
+                animation.weight = moveTowards(animation.weight, 0, this.animationBlendSpeed * deltaSeconds);
             }
+            if(animation.weight > 0 && !animation.isPlaying) animation.play(true);
+            if(animation.weight === 0 && animation.isPlaying) animation.pause();
+
             weightSum += animation.weight;
         }
 
-        this.idleAnim.moveTowardsWeight(Math.min(Math.max(1 - weightSum, 0.0), 1.0), deltaSeconds);
-
-        const scene = this.mesh.getScene();
-
-        // downward raycast
-        const start = this.mesh.position.add(this.mesh.up.scale(50));
-        const end = this.mesh.position.add(this.mesh.up.scale(-50));
-        (scene.getPhysicsEngine() as PhysicsEngineV2).raycastToRef(start, end, this.raycastResult);
-        if (this.raycastResult.hasHit) {
-            this.mesh.position = this.raycastResult.hitPointWorld.add(this.mesh.up.scale(0.01));
-        }
+        this.idleAnim.weight = moveTowards(this.idleAnim.weight, Math.min(Math.max(1 - weightSum, 0.0), 1.0), this.animationBlendSpeed * deltaSeconds);
     }
 }
