@@ -13,17 +13,17 @@ import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { ActionManager, ExecuteCodeAction } from "@babylonjs/core/Actions";
 import { moveTowards } from "./utils";
-import { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody";
 import { AnimationGroup } from "@babylonjs/core/Animations/animationGroup";
-import { PhysicsMotionType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
-import { PhysicsShapeCylinder } from "@babylonjs/core/Physics/v2/physicsShape";
+import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
+import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
+import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 
 export class CharacterController {
-    private readonly transform: TransformNode;
-
     readonly model: AbstractMesh;
 
-    readonly impostorPhysicsBody: PhysicsBody;
+    private readonly impostorMesh: AbstractMesh;
+
+    readonly physicsAggregate: PhysicsAggregate;
 
     readonly moveSpeed = 1.8;
     readonly rotationSpeed = 6;
@@ -66,13 +66,14 @@ export class CharacterController {
     }
 
     private constructor(characterMesh: AbstractMesh, thirdPersonCamera: ArcRotateCamera, scene: Scene) {
-        this.transform = new TransformNode("CharacterTransform", scene);
-        this.transform.rotationQuaternion = Quaternion.Identity();
+        this.impostorMesh = MeshBuilder.CreateCapsule("CharacterTransform", {height: 2, radius: 0.5}, scene);
+        this.impostorMesh.visibility = 0.1;
+        this.impostorMesh.rotationQuaternion = Quaternion.Identity();
 
         this.model = characterMesh;
-        this.model.parent = this.transform;
+        this.model.parent = this.impostorMesh;
         this.model.rotate(Vector3.Up(), Math.PI)
-        this.model.position.y = -0.5
+        this.model.position.y = -1
 
         this.thirdPersonCamera = thirdPersonCamera;
 
@@ -107,22 +108,15 @@ export class CharacterController {
             })
         );
 
-        this.impostorPhysicsBody = new PhysicsBody(this.transform, PhysicsMotionType.DYNAMIC, false, scene);
-        const impostorShape = new PhysicsShapeCylinder(
-            new Vector3(0, -0.5, 0),
-            new Vector3(0, 1.7, 0),
-            0.5,
-            scene
-        );
+        this.physicsAggregate = new PhysicsAggregate(this.getTransform(), PhysicsShapeType.CAPSULE, {mass: 1, friction: 0.5});
 
-        this.impostorPhysicsBody.shape = impostorShape;
-        this.impostorPhysicsBody.setMassProperties({ mass: 1 });
-        this.impostorPhysicsBody.setAngularDamping(100);
-        this.impostorPhysicsBody.setLinearDamping(10);
+        this.physicsAggregate.body.setMassProperties({ inertia: Vector3.ZeroReadOnly });
+        this.physicsAggregate.body.setAngularDamping(100);
+        this.physicsAggregate.body.setLinearDamping(10);
     }
 
     public getTransform() {
-        return this.transform;
+        return this.impostorMesh;
     }
 
     public update(deltaSeconds: number) {        
@@ -165,7 +159,7 @@ export class CharacterController {
             this.targetAnim = this.walkAnim;
 
             const quaternion = rot; //euler.toQuaternion();
-            const impostorQuaternion = this.transform.rotationQuaternion;
+            const impostorQuaternion = this.impostorMesh.rotationQuaternion;
             if (impostorQuaternion === null) {
                 throw new Error("Impostor quaternion is null");
             }
@@ -175,8 +169,8 @@ export class CharacterController {
                 this.rotationSpeed * deltaSeconds,
                 impostorQuaternion
             )
-            this.transform.translate(new Vector3(0, 0, -1), this.moveSpeed * deltaSeconds);
-            this.impostorPhysicsBody.setTargetTransform(this.transform.absolutePosition, impostorQuaternion)
+            this.impostorMesh.translate(new Vector3(0, 0, -1), this.moveSpeed * deltaSeconds);
+            this.physicsAggregate.body.setTargetTransform(this.impostorMesh.absolutePosition, impostorQuaternion)
         }
 
         if (this.inputMap.get("b")) {
@@ -198,5 +192,11 @@ export class CharacterController {
         }
 
         this.idleAnim.weight = moveTowards(this.idleAnim.weight, Math.min(Math.max(1 - weightSum, 0.0), 1.0), this.animationBlendSpeed * deltaSeconds);
+    }
+
+    public dispose() {
+        this.impostorMesh.dispose();
+        this.model.dispose();
+        this.physicsAggregate.dispose();
     }
 }
